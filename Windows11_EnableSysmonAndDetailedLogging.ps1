@@ -1,6 +1,6 @@
-#.SYNOPSIS
-#    Lab Provisioning Script - Console Output Only.
-#    Cleans all logs and artifacts for a pristine snapshot.
+<#.SYNOPSIS
+    Lab Provisioning Script - Console Output Only.
+    Cleans all logs and artifacts for a pristine snapshot.
 #>
 
 # --- 1. PRE-FLIGHT ---
