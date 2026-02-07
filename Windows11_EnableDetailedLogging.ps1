@@ -16,7 +16,31 @@ if (-not $IsAdmin) {
     exit
 }
 
-# --- 1.1 GPEDIT + CMDLINE LOGGING ENABLEMENT ---
+# --- 2. LOG CAPACITY & RETENTION CONTROL ---
+Write-Host "[-] Configuring Event Log Size Limits (1GB, overwrite enabled)..." -ForegroundColor Cyan
+
+$OneGB = 1073741824  # bytes
+
+$EventLogs = @(
+    "Security",
+    "System",
+    "Application",
+    "Microsoft-Windows-Sysmon/Operational",
+    "Microsoft-Windows-PowerShell/Operational",
+    "Windows PowerShell"
+)
+
+foreach ($Log in $EventLogs) {
+    try {
+        wevtutil sl "$Log" /ms:$OneGB /rt:true /ab:false
+        Write-Host "  [+] $Log set to 1GB (overwrite enabled)" -ForegroundColor Green
+    } catch {
+        Write-Host "  [!] Failed to configure $Log" -ForegroundColor DarkYellow
+    }
+}
+
+
+# --- 3. GPEDIT + CMDLINE LOGGING ENABLEMENT ---
 Write-Host "[-] Ensuring Group Policy + Command Line Logging..." -ForegroundColor Cyan
 
 $GpeditPath = "$env:SystemRoot\System32\gpedit.msc"
@@ -92,12 +116,12 @@ Set-ItemProperty `
     -Type DWord `
     -Force
 
-# --- 3. NATIVE AUDIT POLICIES ---
+# --- 4. NATIVE AUDIT POLICIES ---
 Write-Host "[-] Setting Native Audit Policies..." -ForegroundColor Cyan
 auditpol /set /subcategory:"Process Creation" /success:enable | Out-Null
 auditpol /set /subcategory:"File System" /success:enable | Out-Null
 
-# --- 4. SYSMON INSTALLATION ---
+# --- 5. SYSMON INSTALLATION ---
 Write-Host "[-] Installing Sysmon64a..." -ForegroundColor Cyan
 
 $WorkDir = "$env:USERPROFILE\Downloads\Lab_Setup_Temp"
@@ -121,7 +145,7 @@ else {
     Write-Host "[!] Sysmon64a.exe NOT FOUND!" -ForegroundColor Red
 }
 
-# --- 5. SACL CONFIGURATION ---
+# --- 6. SACL CONFIGURATION ---
 Write-Host "[-] Applying SACLs..." -ForegroundColor Cyan
 
 $TargetFolders = @(
@@ -151,7 +175,7 @@ foreach ($F in $TargetFolders) {
     }
 }
 
-# --- 6. FINALIZING ---
+# --- 7. FINALIZING ---
 gpupdate /force | Out-Null
 
 Write-Host ""
