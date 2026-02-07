@@ -1,0 +1,30 @@
+Write-Host "--- PURGING WINDOWS & SYSMON EVENT LOGS ---" -ForegroundColor Yellow
+
+# Must be run as Admin
+if (-not ([Security.Principal.WindowsPrincipal] `
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "[!] Run this script as Administrator." -ForegroundColor Red
+    exit 1
+}
+
+# Logs to purge
+$Logs = @(
+    "Security",
+    "System",
+    "Application",
+    "Microsoft-Windows-Sysmon/Operational",
+    "Microsoft-Windows-PowerShell/Operational",
+    "Windows PowerShell"
+)
+
+foreach ($Log in $Logs) {
+    try {
+        wevtutil cl "$Log"
+        Write-Host "[CLEARED] $Log" -ForegroundColor Green
+    } catch {
+        Write-Host "[SKIPPED] $Log (not found or access denied)" -ForegroundColor DarkYellow
+    }
+}
+
+Write-Host "--- EVENT LOG PURGE COMPLETE ---" -ForegroundColor Yellow
