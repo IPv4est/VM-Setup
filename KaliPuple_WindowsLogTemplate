@@ -1,0 +1,21 @@
+{
+  "index_patterns": ["winlogbeat*"],
+  "data_stream": { }, 
+  "template": {
+    "settings": {
+      "index.default_pipeline": "winlogbeat-event-type",
+      "number_of_shards": 1,
+      "number_of_replicas": 1
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "event_type": { "type": "keyword" },
+        "event.code": { "type": "keyword" },
+        "winlog.event_id": { "type": "keyword" },
+        "message": { "type": "text" }
+      }
+    }
+  },
+  "priority": 501
+}
