@@ -1,0 +1,63 @@
+{
+  "description": "Map Windows, Sysmon, and PowerShell event codes to event_type",
+  "processors": [
+    {
+      "script": {
+        "lang": "painless",
+        "source": """
+          if (ctx.event != null && ctx.event.code != null) {
+            int code = ctx.event.code instanceof Number ? ctx.event.code : Integer.parseInt(ctx.event.code.toString());
+            
+            // Windows Security
+            if (code == 4624) { ctx.event_type = 'logon_success'; }
+            else if (code == 4625) { ctx.event_type = 'logon_failure'; }
+            else if (code == 4634) { ctx.event_type = 'logoff'; }
+            else if (code == 4662) { ctx.event_type = 'object_access'; }
+            else if (code == 4663) { ctx.event_type = 'file_create'; }
+            else if (code == 4688) { ctx.event_type = 'process_start'; }
+            else if (code == 4689) { ctx.event_type = 'process_end'; }
+            else if (code == 4697) { ctx.event_type = 'service_install'; }
+            else if (code == 4703) { ctx.event_type = 'privilege_use'; }
+            else if (code == 4720) { ctx.event_type = 'user_created'; }
+            else if (code == 4726) { ctx.event_type = 'user_deleted'; }
+            else if (code == 4732 || code == 4735) { ctx.event_type = 'group_change'; }
+
+            // Sysmon
+            else if (code == 1) { ctx.event_type = 'process_start'; }
+            else if (code == 2) { ctx.event_type = 'file_modify'; }
+            else if (code == 3) { ctx.event_type = 'network_connection'; }
+            else if (code == 4) { ctx.event_type = 'driver_loaded'; }
+            else if (code == 5) { ctx.event_type = 'process_end'; }
+            else if (code == 6) { ctx.event_type = 'driver_load'; }
+            else if (code == 7) { ctx.event_type = 'module_load'; }
+            else if (code == 8) { ctx.event_type = 'remote_thread'; }
+            else if (code == 9) { ctx.event_type = 'raw_access_read'; }
+            else if (code == 10) { ctx.event_type = 'process_access'; }
+            else if (code == 11) { ctx.event_type = 'file_create'; }
+            else if (code == 12) { ctx.event_type = 'registry_change'; }
+            else if (code == 13) { ctx.event_type = 'registry_modify'; }
+            else if (code == 14) { ctx.event_type = 'file_delete'; }
+            else if (code == 15) { ctx.event_type = 'file_rename'; }
+            else if (code == 17) { ctx.event_type = 'pipe_activity'; }
+            else if (code == 18) { ctx.event_type = 'file_hash'; }
+            else if (code == 19) { ctx.event_type = 'wmi_event'; }
+            else if (code == 20) { ctx.event_type = 'dns_query'; }
+            else if (code == 21) { ctx.event_type = 'file_delete'; }
+
+            // PowerShell
+            else if (code == 400) { ctx.event_type = 'powershell_lifecycle'; }
+            else if (code == 403) { ctx.event_type = 'powershell_module'; }
+            else if (code == 600) { ctx.event_type = 'script_start'; }
+            else if (code == 800) { ctx.event_type = 'script_end'; }
+            else if (code == 4103) { ctx.event_type = 'script_exec'; }
+            else if (code == 4104) { ctx.event_type = 'script_suspicious'; }
+            else if (code == 4105) { ctx.event_type = 'powershell_event'; }
+            else if (code == 4106) { ctx.event_type = 'cmdlet_exec'; }
+
+            else { ctx.event_type = 'other'; }
+          }
+        """
+      }
+    }
+  ]
+}
