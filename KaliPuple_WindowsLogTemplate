@@ -1,3 +1,6 @@
+#Run folloing in Kibana Dev Tools
+
+PUT _index_template/winlogbeat_template
 {
   "index_patterns": ["winlogbeat*"],
   "data_stream": { }, 
