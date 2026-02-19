@@ -1,70 +1,72 @@
 #!/bin/bash
 
 echo "-------------------------------------------------------"
-echo "  GOAD-Light Azure: THE IRONCLAD DEPLOYER (2026)       "
-echo "  Repo: IPV4est/VM-Setup                               "
+echo "  GOAD-Light Azure: THE DEFINITIVE ZERO-TO-HERO       "
+echo "  Repo: IPV4est/VM-Setup (2026 Version)                "
 echo "-------------------------------------------------------"
 
-# 1. SET HOME BASE
-# This ensures we know exactly where we are, even when running via curl
+# 1. SETUP PATHS
 BASE_DIR=$(pwd)
 GOAD_ROOT="$BASE_DIR/GOAD"
 
 # 2. SYSTEM CHECK
 echo "[*] Checking system dependencies..."
-if ! command -v brew &> /dev/null; then
-    echo "[!] Homebrew not found. Install it at https://brew.sh/"
-    exit 1
-fi
-
-for tool in az terraform python3 jq; do
+for tool in az terraform python3 jq git; do
     if ! command -v $tool &> /dev/null; then
-        echo "[*] Installing $tool..."
+        echo "[*] Installing $tool via Homebrew..."
         brew install $tool
     fi
 done
 
 # 3. AZURE AUTHENTICATION
-echo "[*] Checking Azure connection..."
 if ! az account show --output none 2>/dev/null; then
-    echo "[*] Opening browser for Azure Login..."
+    echo "[*] Please login to Azure in the browser window..."
     az login --output table
 fi
 
-# 4. CLEAN CLONE
-if [ -d "$GOAD_ROOT" ]; then
-    echo "[!] Existing GOAD folder found at $GOAD_ROOT. Removing for clean start..."
-    rm -rf "$GOAD_ROOT"
+# 4. THE CLEAN CLONE
+echo "[*] Cleaning up any old attempts..."
+rm -rf "$GOAD_ROOT"
+
+echo "[*] Cloning official GOAD repository..."
+git clone --depth 1 https://github.com/Orange-Cyberdefense/GOAD.git "$GOAD_ROOT"
+
+# 5. THE CRITICAL NAVIGATION (The fix for your file error)
+cd "$GOAD_ROOT" || exit 1
+
+# Check if we are in the 'main' repo or if we need to step into the lab folder
+if [ ! -f "requirements.txt" ]; then
+    echo "[!] requirements.txt not in root. Searching..."
+    # Some versions of GOAD put the lab files in the root, others in a subfolder.
+    # We find where requirements.txt lives and move THERE.
+    REAL_ROOT=$(find . -name "requirements.txt" -not -path "*/.*" | head -n 1 | xargs dirname)
+    cd "$REAL_ROOT" || exit 1
+    GOAD_ROOT=$(pwd)
 fi
 
-echo "[*] Cloning GOAD into $GOAD_ROOT..."
-git clone https://github.com/Orange-Cyberdefense/GOAD.git "$GOAD_ROOT"
+echo "[+] Successfully located Lab Root at: $GOAD_ROOT"
 
-# 5. INSTALL REQUIREMENTS (Absolute Path Fix)
+# 6. INSTALL REQUIREMENTS
 echo "[*] Installing Ansible & Python requirements..."
-if [ -f "$GOAD_ROOT/requirements.txt" ]; then
-    python3 -m pip install -r "$GOAD_ROOT/requirements.txt" --quiet
-    ansible-galaxy role install -r "$GOAD_ROOT/requirements.yml"
-    ansible-galaxy collection install -r "$GOAD_ROOT/requirements.yml"
-else
-    echo "[-] FATAL ERROR: requirements.txt not found at $GOAD_ROOT/requirements.txt"
-    exit 1
-fi
+python3 -m pip install --upgrade pip --quiet
+python3 -m pip install -r requirements.txt --user --quiet
+ansible-galaxy role install -r requirements.yml
+ansible-galaxy collection install -r requirements.yml
 
-# 6. THE AUTOMATED PATCHES (Absolute Path Logic)
+# 7. THE AUTOMATED PATCHES
 echo "[*] Applying Azure 2026 Compatibility Patches..."
 AZ_PATH="$GOAD_ROOT/template/provider/azure"
 DATA_PATH="$GOAD_ROOT/ad/GOAD-Light/data"
 
-# Global Search and Replace for Regions/SKUs/VM Sizes
+# Region and SKU Fixes
 find "$AZ_PATH" -type f -print0 | xargs -0 perl -pi -e 's/westeurope|europe/westus2/g'
 find "$AZ_PATH" -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/sku\s*=\s*"Basic"/sku = "Standard"/g; s/allocation_method\s*=\s*"Dynamic"/allocation_method = "Static"/g'
 find "$AZ_PATH" -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/Standard_B2s/Standard_D2s_v3/g'
 
-# Fix for the "Ethernet" vs "Ethernet 2" Azure naming bug
+# Network Adapter Wildcard Fix
 find "$DATA_PATH" -type f -name "variables.yml" -print0 | xargs -0 perl -pi -e 's/adapter_names: "Ethernet"/adapter_names: "Ethernet*"/g'
 
-# Inject WinRM and RDP rules into network.tf
+# Firewall Rule Injection
 if ! grep -q "allow_mgmt" "$AZ_PATH/network.tf"; then
 cat <<EOF >> "$AZ_PATH/network.tf"
 resource "azurerm_network_security_rule" "allow_mgmt" {
@@ -83,7 +85,7 @@ resource "azurerm_network_security_rule" "allow_mgmt" {
 EOF
 fi
 
-# Overwrite Jumpbox.tf with Fixed SSH Logic
+# Jumpbox Logic (Force SSH Key Generation)
 cat <<EOF > "$AZ_PATH/jumpbox.tf"
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
@@ -136,9 +138,9 @@ resource "azurerm_linux_virtual_machine" "jumpbox" {
 }
 EOF
 
-# 7. EXECUTE
-echo "[*] Entering GOAD and launching build..."
-cd "$GOAD_ROOT" || exit 1
-rm -rf workspace/*
+# 8. LAUNCH
+echo "[*] Workspace cleared. Launching deployment..."
+rm -rf "$GOAD_ROOT/workspace"
+mkdir -p "$GOAD_ROOT/workspace"
 export TF_VAR_location="westus2"
 ./goad.sh -t install -l GOAD-Light -p azure -m local
