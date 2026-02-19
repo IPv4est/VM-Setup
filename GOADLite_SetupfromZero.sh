@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "-------------------------------------------------------"
-echo "  GOAD-Light Azure: ZERO-TO-HERO DEPLOYER (2026)       "
+echo "  GOAD-Light Azure: ZERO-TO-HERO (PATH-HARDENED)       "
 echo "  Repo: IPV4est/VM-Setup                               "
 echo "-------------------------------------------------------"
 
@@ -26,41 +26,46 @@ if ! az account show --output none 2>/dev/null; then
     az login --output table
 fi
 
-# 3. SMART DIRECTORY HANDLING (The Fix)
-if [ -f "goad.sh" ]; then
-    echo "[+] Already inside GOAD directory."
-elif [ -d "GOAD" ]; then
-    echo "[+] GOAD directory found. Moving into it..."
-    cd GOAD
-else
-    echo "[*] Cloning GOAD repository..."
-    git clone https://github.com/Orange-Cyberdefense/GOAD.git
-    cd GOAD
+# 3. CLEAN CLONE (Forces the correct directory context)
+if [ -d "GOAD" ]; then
+    echo "[!] Existing GOAD directory found. Removing to ensure clean context..."
+    rm -rf GOAD
 fi
+
+echo "[*] Cloning fresh GOAD repository..."
+git clone https://github.com/Orange-Cyberdefense/GOAD.git
+cd GOAD || { echo "[-] Failed to enter GOAD directory"; exit 1; }
 
 # 4. INSTALL REQUIREMENTS
 echo "[*] Installing Ansible & Python requirements..."
-# Check if requirements file exists before running
 if [ -f "requirements.txt" ]; then
     python3 -m pip install -r requirements.txt --quiet
-    # Fixed ansible-galaxy syntax
+    # Fixed galaxy syntax (No --quiet at the end)
     ansible-galaxy role install -r requirements.yml
     ansible-galaxy collection install -r requirements.yml
 else
-    echo "[!] Error: requirements.txt not found. Are we in the right folder?"
+    echo "[-] ERROR: requirements.txt not found. Clone failed."
     exit 1
 fi
 
-# 5. THE AUTOMATED PATCHES
+# 5. THE AUTOMATED PATCHES (With Path Verification)
 echo "[*] Applying Azure 2026 Compatibility Patches..."
 
-find template/provider/azure -type f -print0 | xargs -0 perl -pi -e 's/westeurope|europe/westus2/g'
-find template/provider/azure -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/sku\s*=\s*"Basic"/sku = "Standard"/g; s/allocation_method\s*=\s*"Dynamic"/allocation_method = "Static"/g'
-find template/provider/azure -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/Standard_B2s/Standard_D2s_v3/g'
+# Verify the path exists before running find
+AZ_PATH="template/provider/azure"
+if [ ! -d "$AZ_PATH" ]; then
+    echo "[-] ERROR: $AZ_PATH not found. We are in: $(pwd)"
+    exit 1
+fi
+
+find "$AZ_PATH" -type f -print0 | xargs -0 perl -pi -e 's/westeurope|europe/westus2/g'
+find "$AZ_PATH" -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/sku\s*=\s*"Basic"/sku = "Standard"/g; s/allocation_method\s*=\s*"Dynamic"/allocation_method = "Static"/g'
+find "$AZ_PATH" -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/Standard_B2s/Standard_D2s_v3/g'
 find ad/GOAD-Light/data -type f -name "variables.yml" -print0 | xargs -0 perl -pi -e 's/adapter_names: "Ethernet"/adapter_names: "Ethernet*"/g'
 
-if ! grep -q "allow_mgmt" template/provider/azure/network.tf; then
-cat <<EOF >> template/provider/azure/network.tf
+# Network Security Group Logic
+if ! grep -q "allow_mgmt" "$AZ_PATH/network.tf"; then
+cat <<EOF >> "$AZ_PATH/network.tf"
 resource "azurerm_network_security_rule" "allow_mgmt" {
   name                        = "allow_mgmt"
   priority                    = 110
@@ -77,7 +82,8 @@ resource "azurerm_network_security_rule" "allow_mgmt" {
 EOF
 fi
 
-cat <<EOF > template/provider/azure/jumpbox.tf
+# Jumpbox Logic
+cat <<EOF > "$AZ_PATH/jumpbox.tf"
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
   rsa_bits  = 4096
