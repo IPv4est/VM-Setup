@@ -1,11 +1,16 @@
 #!/bin/bash
 
 echo "-------------------------------------------------------"
-echo "  GOAD-Light Azure: ZERO-TO-HERO (PATH-HARDENED)       "
+echo "  GOAD-Light Azure: THE IRONCLAD DEPLOYER (2026)       "
 echo "  Repo: IPV4est/VM-Setup                               "
 echo "-------------------------------------------------------"
 
-# 1. SYSTEM CHECK
+# 1. SET HOME BASE
+# This ensures we know exactly where we are, even when running via curl
+BASE_DIR=$(pwd)
+GOAD_ROOT="$BASE_DIR/GOAD"
+
+# 2. SYSTEM CHECK
 echo "[*] Checking system dependencies..."
 if ! command -v brew &> /dev/null; then
     echo "[!] Homebrew not found. Install it at https://brew.sh/"
@@ -19,51 +24,47 @@ for tool in az terraform python3 jq; do
     fi
 done
 
-# 2. AZURE AUTHENTICATION
+# 3. AZURE AUTHENTICATION
 echo "[*] Checking Azure connection..."
 if ! az account show --output none 2>/dev/null; then
     echo "[*] Opening browser for Azure Login..."
     az login --output table
 fi
 
-# 3. CLEAN CLONE (Forces the correct directory context)
-if [ -d "GOAD" ]; then
-    echo "[!] Existing GOAD directory found. Removing to ensure clean context..."
-    rm -rf GOAD
+# 4. CLEAN CLONE
+if [ -d "$GOAD_ROOT" ]; then
+    echo "[!] Existing GOAD folder found at $GOAD_ROOT. Removing for clean start..."
+    rm -rf "$GOAD_ROOT"
 fi
 
-echo "[*] Cloning fresh GOAD repository..."
-git clone https://github.com/Orange-Cyberdefense/GOAD.git
-cd GOAD || { echo "[-] Failed to enter GOAD directory"; exit 1; }
+echo "[*] Cloning GOAD into $GOAD_ROOT..."
+git clone https://github.com/Orange-Cyberdefense/GOAD.git "$GOAD_ROOT"
 
-# 4. INSTALL REQUIREMENTS
+# 5. INSTALL REQUIREMENTS (Absolute Path Fix)
 echo "[*] Installing Ansible & Python requirements..."
-if [ -f "requirements.txt" ]; then
-    python3 -m pip install -r requirements.txt --quiet
-    # Fixed galaxy syntax (No --quiet at the end)
-    ansible-galaxy role install -r requirements.yml
-    ansible-galaxy collection install -r requirements.yml
+if [ -f "$GOAD_ROOT/requirements.txt" ]; then
+    python3 -m pip install -r "$GOAD_ROOT/requirements.txt" --quiet
+    ansible-galaxy role install -r "$GOAD_ROOT/requirements.yml"
+    ansible-galaxy collection install -r "$GOAD_ROOT/requirements.yml"
 else
-    echo "[-] ERROR: requirements.txt not found. Clone failed."
+    echo "[-] FATAL ERROR: requirements.txt not found at $GOAD_ROOT/requirements.txt"
     exit 1
 fi
 
-# 5. THE AUTOMATED PATCHES (With Path Verification)
+# 6. THE AUTOMATED PATCHES (Absolute Path Logic)
 echo "[*] Applying Azure 2026 Compatibility Patches..."
+AZ_PATH="$GOAD_ROOT/template/provider/azure"
+DATA_PATH="$GOAD_ROOT/ad/GOAD-Light/data"
 
-# Verify the path exists before running find
-AZ_PATH="template/provider/azure"
-if [ ! -d "$AZ_PATH" ]; then
-    echo "[-] ERROR: $AZ_PATH not found. We are in: $(pwd)"
-    exit 1
-fi
-
+# Global Search and Replace for Regions/SKUs/VM Sizes
 find "$AZ_PATH" -type f -print0 | xargs -0 perl -pi -e 's/westeurope|europe/westus2/g'
 find "$AZ_PATH" -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/sku\s*=\s*"Basic"/sku = "Standard"/g; s/allocation_method\s*=\s*"Dynamic"/allocation_method = "Static"/g'
 find "$AZ_PATH" -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/Standard_B2s/Standard_D2s_v3/g'
-find ad/GOAD-Light/data -type f -name "variables.yml" -print0 | xargs -0 perl -pi -e 's/adapter_names: "Ethernet"/adapter_names: "Ethernet*"/g'
 
-# Network Security Group Logic
+# Fix for the "Ethernet" vs "Ethernet 2" Azure naming bug
+find "$DATA_PATH" -type f -name "variables.yml" -print0 | xargs -0 perl -pi -e 's/adapter_names: "Ethernet"/adapter_names: "Ethernet*"/g'
+
+# Inject WinRM and RDP rules into network.tf
 if ! grep -q "allow_mgmt" "$AZ_PATH/network.tf"; then
 cat <<EOF >> "$AZ_PATH/network.tf"
 resource "azurerm_network_security_rule" "allow_mgmt" {
@@ -82,7 +83,7 @@ resource "azurerm_network_security_rule" "allow_mgmt" {
 EOF
 fi
 
-# Jumpbox Logic
+# Overwrite Jumpbox.tf with Fixed SSH Logic
 cat <<EOF > "$AZ_PATH/jumpbox.tf"
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
@@ -135,8 +136,9 @@ resource "azurerm_linux_virtual_machine" "jumpbox" {
 }
 EOF
 
-# 6. EXECUTE
-echo "[*] Cleaning workspace and launching..."
+# 7. EXECUTE
+echo "[*] Entering GOAD and launching build..."
+cd "$GOAD_ROOT" || exit 1
 rm -rf workspace/*
 export TF_VAR_location="westus2"
 ./goad.sh -t install -l GOAD-Light -p azure -m local
