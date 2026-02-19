@@ -5,7 +5,7 @@ echo "  GOAD-Light Azure: ZERO-TO-HERO DEPLOYER (2026)       "
 echo "  Repo: IPV4est/VM-Setup                               "
 echo "-------------------------------------------------------"
 
-# 1. SYSTEM CHECK (Homebrew + Tools)
+# 1. SYSTEM CHECK
 echo "[*] Checking system dependencies..."
 if ! command -v brew &> /dev/null; then
     echo "[!] Homebrew not found. Install it at https://brew.sh/"
@@ -26,30 +26,39 @@ if ! az account show --output none 2>/dev/null; then
     az login --output table
 fi
 
-# 3. DOWNLOAD & PREP
-if [ ! -d "GOAD" ]; then
+# 3. SMART DIRECTORY HANDLING (The Fix)
+if [ -f "goad.sh" ]; then
+    echo "[+] Already inside GOAD directory."
+elif [ -d "GOAD" ]; then
+    echo "[+] GOAD directory found. Moving into it..."
+    cd GOAD
+else
     echo "[*] Cloning GOAD repository..."
     git clone https://github.com/Orange-Cyberdefense/GOAD.git
+    cd GOAD
 fi
-cd GOAD
 
+# 4. INSTALL REQUIREMENTS
 echo "[*] Installing Ansible & Python requirements..."
-python3 -m pip install --upgrade pip --quiet
-python3 -m pip install -r requirements.txt --quiet
-ansible-galaxy install -r requirements.yml --quiet
+# Check if requirements file exists before running
+if [ -f "requirements.txt" ]; then
+    python3 -m pip install -r requirements.txt --quiet
+    # Fixed ansible-galaxy syntax
+    ansible-galaxy role install -r requirements.yml
+    ansible-galaxy collection install -r requirements.yml
+else
+    echo "[!] Error: requirements.txt not found. Are we in the right folder?"
+    exit 1
+fi
 
-# 4. THE AUTOMATED PATCHES (THE FIXES)
+# 5. THE AUTOMATED PATCHES
 echo "[*] Applying Azure 2026 Compatibility Patches..."
 
-# Fix Regions, SKUs, and VM Sizes
 find template/provider/azure -type f -print0 | xargs -0 perl -pi -e 's/westeurope|europe/westus2/g'
 find template/provider/azure -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/sku\s*=\s*"Basic"/sku = "Standard"/g; s/allocation_method\s*=\s*"Dynamic"/allocation_method = "Static"/g'
 find template/provider/azure -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/Standard_B2s/Standard_D2s_v3/g'
-
-# NEW: Fix for the "Ethernet" vs "Ethernet 2" Azure naming bug
 find ad/GOAD-Light/data -type f -name "variables.yml" -print0 | xargs -0 perl -pi -e 's/adapter_names: "Ethernet"/adapter_names: "Ethernet*"/g'
 
-# Inject WinRM and RDP rules into network.tf
 if ! grep -q "allow_mgmt" template/provider/azure/network.tf; then
 cat <<EOF >> template/provider/azure/network.tf
 resource "azurerm_network_security_rule" "allow_mgmt" {
@@ -68,7 +77,6 @@ resource "azurerm_network_security_rule" "allow_mgmt" {
 EOF
 fi
 
-# Overwrite Jumpbox.tf for SSH Key Persistence & goad user
 cat <<EOF > template/provider/azure/jumpbox.tf
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
@@ -121,7 +129,7 @@ resource "azurerm_linux_virtual_machine" "jumpbox" {
 }
 EOF
 
-# 5. EXECUTE
+# 6. EXECUTE
 echo "[*] Cleaning workspace and launching..."
 rm -rf workspace/*
 export TF_VAR_location="westus2"
