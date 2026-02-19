@@ -1,53 +1,55 @@
 #!/bin/bash
 
 echo "-------------------------------------------------------"
-echo "  GOAD-Light Azure: ZERO-MANUAL-EDIT DEPLOYER (2026)   "
+echo "  GOAD-Light Azure: ZERO-TO-HERO DEPLOYER (2026)       "
+echo "  Repo: IPV4est/VM-Setup                               "
 echo "-------------------------------------------------------"
 
-# 1. SYSTEM CHECK (The "Do I have the tools?" part)
-echo "[*] Ensuring you have the right tools installed..."
+# 1. SYSTEM CHECK (Homebrew + Tools)
+echo "[*] Checking system dependencies..."
 if ! command -v brew &> /dev/null; then
-    echo "[!] Homebrew is missing. Install it at https://brew.sh/ first."
+    echo "[!] Homebrew not found. Install it at https://brew.sh/"
     exit 1
 fi
 
 for tool in az terraform python3 jq; do
     if ! command -v $tool &> /dev/null; then
-        echo "[*] Installing $tool via Homebrew..."
+        echo "[*] Installing $tool..."
         brew install $tool
-    else
-        echo "[+] $tool is ready."
     fi
 done
 
-# 2. AZURE LOGIN (The "UI" part)
+# 2. AZURE AUTHENTICATION
 echo "[*] Checking Azure connection..."
 if ! az account show --output none 2>/dev/null; then
-    echo "[*] Opening browser for Azure Login. Please select your account..."
+    echo "[*] Opening browser for Azure Login..."
     az login --output table
 fi
 
-# 3. GET THE LAB
+# 3. DOWNLOAD & PREP
 if [ ! -d "GOAD" ]; then
-    echo "[*] Downloading GOAD from GitHub..."
+    echo "[*] Cloning GOAD repository..."
     git clone https://github.com/Orange-Cyberdefense/GOAD.git
 fi
 cd GOAD
 
-# 4. INSTALL REQUIREMENTS
-echo "[*] Setting up Ansible and Python dependencies..."
+echo "[*] Installing Ansible & Python requirements..."
+python3 -m pip install --upgrade pip --quiet
 python3 -m pip install -r requirements.txt --quiet
 ansible-galaxy install -r requirements.yml --quiet
 
-# 5. THE AUTOMATED FIXES (THIS REPLACES ALL NANO STEPS)
-echo "[*] Patching templates automatically..."
+# 4. THE AUTOMATED PATCHES (THE FIXES)
+echo "[*] Applying Azure 2026 Compatibility Patches..."
 
-# Fix regions and IP SKUs globally (Surgical search and replace)
+# Fix Regions, SKUs, and VM Sizes
 find template/provider/azure -type f -print0 | xargs -0 perl -pi -e 's/westeurope|europe/westus2/g'
 find template/provider/azure -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/sku\s*=\s*"Basic"/sku = "Standard"/g; s/allocation_method\s*=\s*"Dynamic"/allocation_method = "Static"/g'
 find template/provider/azure -type f -name "*.tf" -print0 | xargs -0 perl -pi -e 's/Standard_B2s/Standard_D2s_v3/g'
 
-# Add WinRM/RDP firewall rules to network.tf (The "No-Nano" way)
+# NEW: Fix for the "Ethernet" vs "Ethernet 2" Azure naming bug
+find ad/GOAD-Light/data -type f -name "variables.yml" -print0 | xargs -0 perl -pi -e 's/adapter_names: "Ethernet"/adapter_names: "Ethernet*"/g'
+
+# Inject WinRM and RDP rules into network.tf
 if ! grep -q "allow_mgmt" template/provider/azure/network.tf; then
 cat <<EOF >> template/provider/azure/network.tf
 resource "azurerm_network_security_rule" "allow_mgmt" {
@@ -66,7 +68,7 @@ resource "azurerm_network_security_rule" "allow_mgmt" {
 EOF
 fi
 
-# Create a clean Jumpbox.tf with the correct SSH logic (The "No-Nano" way)
+# Overwrite Jumpbox.tf for SSH Key Persistence & goad user
 cat <<EOF > template/provider/azure/jumpbox.tf
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
@@ -119,8 +121,8 @@ resource "azurerm_linux_virtual_machine" "jumpbox" {
 }
 EOF
 
-# 6. RUN
-echo "[*] Cleaning workspace and launching build..."
+# 5. EXECUTE
+echo "[*] Cleaning workspace and launching..."
 rm -rf workspace/*
 export TF_VAR_location="westus2"
 ./goad.sh -t install -l GOAD-Light -p azure -m local
