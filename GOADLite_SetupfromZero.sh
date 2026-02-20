@@ -1,13 +1,14 @@
 #!/bin/bash
 
 echo "-------------------------------------------------------"
-echo "   GOAD-Light Azure: THE 'NO-FAIL' V4 MASTER BUILDER    "
+echo "    GOAD-Light Azure: UNIFIED MASTER BUILDER           "
 echo "-------------------------------------------------------"
 
 # 1. CLEAN START
+# Removed version-specific folder naming
 cd "$HOME"
-rm -rf GOAD_V4_FINAL 2>/dev/null
-mkdir GOAD_V4_FINAL && cd GOAD_V4_FINAL
+rm -rf GOAD_AZURE_DEPLOYMENT 2>/dev/null
+mkdir GOAD_AZURE_DEPLOYMENT && cd GOAD_AZURE_DEPLOYMENT
 
 # 2. CLONE & INSTALL
 git clone --depth 1 https://github.com/Orange-Cyberdefense/GOAD.git .
@@ -70,29 +71,21 @@ EOF
 
 # 4. AGGRESSIVE NIC & REGION PATCHING
 echo "[*] Applying Universal patches..."
-# Fixes Region, SKU, and Size
 find . -type f -name "*.tf" -not -name "jumpbox.tf" -exec perl -pi -e 's/westeurope|europe/westus2/g; s/sku\s*=\s*"Basic"/sku = "Standard"/g; s/Standard_B2s/Standard_D2s_v3/g; s/allocation_method\s*=\s*"Dynamic"/allocation_method = "Static"/g' {} +
-
-# THE ETHERNET FIX: Replaces hardcoded names with dynamic lookup of the active interface index
-# This prevents the "InterfaceAlias Ethernet not found" crash at the end of the run.
 find . -type f \( -name "*.yml" -o -name "*.ps1" \) -exec sed -i '' 's/InterfaceAlias "Ethernet"/InterfaceIndex (Get-NetAdapter | Where-Object {$_.Status -eq "Up"}).InterfaceIndex/g' {} +
-
-# Fix 21H2 -> 22H2 (The "Image Not Found" fix)
 find . -name "*.tf" -exec sed -i '' 's/win10-21h2-pro-g2/win10-22h2-pro-g2/g' {} +
 
 # 5. CORE DEPLOYMENT
-echo "[*] Launching GOAD Core... This is the long haul."
+echo "[*] Launching GOAD Core Deployment..."
 export TF_VAR_location="westus2"
 chmod +x goad.sh
 ./goad.sh -t install -l GOAD-Light -p azure -m local
 
-# 6. WS01 SIDE-LOAD (Standardized Win10 Image)
+# 6. WS01 SIDE-LOAD
 echo "[*] Main Lab complete. Attempting WS01 Side-load..."
 RG_NAME=$(az group list --query "[?contains(name, 'GOAD')].name" -o tsv | head -n 1)
 
 if [ ! -z "$RG_NAME" ]; then
-    echo "[*] Using Resource Group: $RG_NAME"
-    
     az vm create \
       --resource-group "$RG_NAME" \
       --name "WS01" \
@@ -102,38 +95,66 @@ if [ ! -z "$RG_NAME" ]; then
       --admin-password "Password123!" \
       --vnet-name "goad-vnet" \
       --subnet "goad-subnet" \
-      --public-ip-address "" \
-      --nsg-rule "" 
-      
-    NIC_ID=$(az vm show -g "$RG_NAME" -n "WS01" --query "networkProfile.networkInterfaces[0].id" -o tsv)
-    if [ ! -z "$NIC_ID" ]; then
-        NIC_NAME=$(basename "$NIC_ID")
-        az network nic update --name "$NIC_NAME" --resource-group "$RG_NAME" --dns-servers 192.168.10.10 8.8.8.8
-    fi
+      --private-ip-address "192.168.56.22" \
+      --public-ip-address "" 
+
+    # 7. POST-DEPLOYMENT HYDRATION (THE EXPIRED PASSWORD FIX)
+    echo "[*] Applying WS01 'Expired Password' and RDP Fixes..."
+    
+    az vm run-command invoke -g "$RG_NAME" -n "WS01" --command-id RunPowerShellScript --scripts "
+    net user goadadmin Password123! /active:yes;
+    net user labadmin Password123! /add;
+    net localgroup administrators labadmin /add;
+    wmic useraccount where name='goadadmin' set passwordexpires=false;
+    wmic useraccount where name='labadmin' set passwordexpires=false;
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0;
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'SecurityLayer' -Value 1;
+    Restart-Service TermService -Force;
+    Set-DnsClientServerAddress -InterfaceAlias 'Ethernet*' -ServerAddresses ('192.168.56.10')
+    "
 else
     echo "[!] ERROR: No GOAD Resource Group found."
 fi
 
-# 7. GENERATE ACCESS GUIDE
-echo "[*] Generating ACCESS_GUIDE.txt..."
-# Logic to find the public IP even if terraform output is buried
+# 8. GENERATE VERBOSE ACCESS GUIDE
 JUMPBOX_IP=$(az network public-ip show -g "$RG_NAME" -n "ubuntu-public-ip" --query "ipAddress" -o tsv)
 SSH_KEY_PATH="$(pwd)/ssh_keys/ubuntu-jumpbox.pem"
 chmod 400 "$SSH_KEY_PATH"
 
 {
   echo "====================================================="
-  echo "         GOAD-LIGHT MASTER ACCESS GUIDE V4           "
+  echo "         GOAD-LIGHT INFRASTRUCTURE ACCESS GUIDE      "
   echo "====================================================="
-  echo "Jumpbox Public IP: $JUMPBOX_IP"
-  echo "SSH Command:       ssh -i $SSH_KEY_PATH goad@$JUMPBOX_IP"
+  echo "1. ESTABLISH THE SSH TUNNEL"
+  echo "-----------------------------------------------------"
+  echo "Open a fresh terminal on your Mac and run:"
+  echo "ssh -i $SSH_KEY_PATH -L 3390:192.168.56.22:3389 goad@$JUMPBOX_IP"
   echo ""
-  echo "--- WS01 WORKSTATION ---"
-  echo "Internal IP:       192.168.10.20"
-  echo "Admin User:        goadadmin / Password123!"
+  echo "KEEP THIS TERMINAL OPEN. This maps the remote WS01 RDP "
+  echo "port to your local machine at port 3390."
   echo ""
-  echo "--- CLEANUP COMMAND ---"
-  echo "az group delete --name $RG_NAME --yes --no-wait"
+  echo "2. CONNECT VIA REMOTE DESKTOP"
+  echo "-----------------------------------------------------"
+  echo "Open Microsoft Remote Desktop and add a new PC:"
+  echo "PC Name:           127.0.0.1:3390"
+  echo "User Account:      Choose 'Ask when required'"
+  echo ""
+  echo "When prompted for credentials, use:"
+  echo "Username:          .\labadmin   (or .\goadadmin)"
+  echo "Password:          Password123!"
+  echo ""
+  echo "3. TROUBLESHOOTING EXPIRED PASSWORDS"
+  echo "-----------------------------------------------------"
+  echo "If you receive error 0x207, the NLA bypass in Section 7"
+  echo "of the script ensures you can reach the Windows login"
+  echo "screen inside the RDP window. If it asks for a change,"
+  echo "you can now perform it manually within that window."
+  echo ""
+  echo "4. DOMAIN INFORMATION"
+  echo "-----------------------------------------------------"
+  echo "Domain:            north.sevenkingdoms.local"
+  echo "Domain Controller: 192.168.56.10 (KingsLanding)"
+  echo "Workstation IP:    192.168.56.22"
   echo "====================================================="
 } > "./ACCESS_GUIDE.txt"
 
